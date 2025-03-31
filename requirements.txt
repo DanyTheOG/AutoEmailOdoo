@@ -1,4 +1,5 @@
 yfinance
 matplotlib
-pywin32
+pandas
 openpyxl
+pywin32; platform_system=="Windows"
