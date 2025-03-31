@@ -1,0 +1,4 @@
+yfinance
+matplotlib
+pywin32
+openpyxl
