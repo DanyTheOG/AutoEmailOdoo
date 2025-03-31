@@ -16,28 +16,29 @@ from datetime import datetime, timedelta
 # ----------------------------
 print("Connecting to Odoo and fetching leads...")
 
-# Odoo connection details
-url = "https://odoo-scoobic-holding-test.nip.ccit.es"
-db = "copiaprod24-3-25"
-api_key = "ea367fca0859bfe36192197c6606a79035f7e944"
-username_odoo = "daniel.byle@scoobic.com"
+# Odoo connection details (retrieved from environment variables or hardcoded for testing)
+ODOO_URL = os.getenv("ODOO_URL", "https://odoo-scoobic-holding-test.nip.ccit.es")
+ODOO_DB = os.getenv("ODOO_DB", "copiaprod24-3-25")
+ODOO_API_KEY = os.getenv("ODOO_API_KEY", "ea367fca0859bfe36192197c6606a79035f7e944")
+ODOO_USERNAME = os.getenv("ODOO_USERNAME", "daniel.byle@scoobic.com")
 
 # Authenticate with Odoo
-common = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/common")
-uid = common.authenticate(db, username_odoo, api_key, {})
+common = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/common")
+uid = common.authenticate(ODOO_DB, ODOO_USERNAME, ODOO_API_KEY, {})
 
 # Connect to the object API
-models = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/object")
+models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
 
-# Domain filter: no filter for now, fetch all leads
+# Domain filter: for now, no filtering on location, fetch all leads
 domain = []
 
-# Fields to export (feel free to add/remove fields as needed)
-fields = ['name', 'email_from', 'create_date', 'phone', 'stage_id']
+# Fields to export: we only need id, name, email_from, create_date and city.
+# (Ensure that 'city' is an actual field on your leads. If not, we may need to adjust.)
+fields = ['id', 'name', 'email_from', 'create_date', 'city']
 
 # Get all leads ordered by create_date descending
 leads = models.execute_kw(
-    db, uid, api_key,
+    ODOO_DB, uid, ODOO_API_KEY,
     'crm.lead', 'search_read',
     [domain],
     {'fields': fields, 'order': 'create_date desc'}
@@ -55,7 +56,8 @@ print("Field mapping (columns):")
 print(df.columns)
 print("\nSample record:")
 print(df.head(1))
-# You can see how the fields are set up from the output above.
+# Verify here if the 'city' field is present.
+# If not, we may need to fetch it from a related record.
 
 # Convert create_date to datetime (assuming ISO format)
 df['create_date'] = pd.to_datetime(df['create_date'])
@@ -63,7 +65,7 @@ df['create_date'] = pd.to_datetime(df['create_date'])
 # ----------------------------
 # Part 2: Filter and Export Leads
 # ----------------------------
-# Define the "new leads" window: last 25 hours (to have a 1-hour overlap)
+# Define the "new leads" window: last 25 hours (to include a 1-hour overlap)
 now = datetime.utcnow()
 window_start = now - timedelta(hours=25)
 
