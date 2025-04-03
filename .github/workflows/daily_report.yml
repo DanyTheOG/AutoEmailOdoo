@@ -2,33 +2,33 @@ name: Daily Leads Report
 
 on:
   schedule:
-    - cron: '0 8 * * *'  # Runs every day at 08:00 UTC; adjust as needed.
-  workflow_dispatch:      # Allows you to manually trigger the workflow.
+    - cron: '0 8 * * *'  # Runs every day at 08:00 UTC; adjust if needed.
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-    - name: Run autoEmail.py
-      env:
-        EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
-        EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-        ODOO_URL: ${{ secrets.ODOO_URL }}
-        ODOO_DB: ${{ secrets.ODOO_DB }}
-        ODOO_API_KEY: ${{ secrets.ODOO_API_KEY }}
-        ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
-      run: python autoEmail.py
+      - name: Run autoEmail.py
+        env:
+          EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          ODOO_URL: ${{ secrets.ODOO_URL }}
+          ODOO_DB: ${{ secrets.ODOO_DB }}
+          ODOO_API_KEY: ${{ secrets.ODOO_API_KEY }}
+          ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
+        run: python autoEmail.py
