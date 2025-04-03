@@ -30,7 +30,7 @@ uid = common.authenticate(ODOO_DB, ODOO_USERNAME, ODOO_API_KEY, {})
 models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
 
 domain = []
-fields = ['id', 'name', 'email_from', 'create_date', 'city', 'country_id', 'country_id.name']
+fields = ['id', 'name', 'email_from', 'create_date', 'city', 'country_id']
 
 leads = models.execute_kw(
     ODOO_DB, uid, ODOO_API_KEY,
