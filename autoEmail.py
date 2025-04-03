@@ -30,7 +30,7 @@ uid = common.authenticate(ODOO_DB, ODOO_USERNAME, ODOO_API_KEY, {})
 models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
 
 domain = []
-fields = ['id', 'name', 'email_from', 'create_date', 'city']
+fields = ['id', 'name', 'email_from', 'create_date', 'city', 'country_id', 'country_id.name']
 
 leads = models.execute_kw(
     ODOO_DB, uid, ODOO_API_KEY,
@@ -51,6 +51,18 @@ print("Field mapping (columns):")
 print(df.columns)
 print("\nSample record:")
 print(df.head(1))
+
+##############################################
+# Show all columns that were fetched
+print("Columns fetched from Odoo:")
+print(df.columns)
+
+# Display a few rows to see the data
+print("\nSample Data:")
+print(df.head())
+###############################################
+
+
 
 df['create_date'] = pd.to_datetime(df['create_date'])
 
