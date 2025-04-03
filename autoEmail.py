@@ -16,10 +16,10 @@ from datetime import datetime, timedelta
 # ----------------------------
 print("Connecting to Odoo and fetching leads...")
 
-# Odoo connection details (retrieved from environment variables or hardcoded for testing)
+# Odoo connection details (use your production details here)
 ODOO_URL = os.getenv("ODOO_URL", "https://odoo-scoobic-holding-test.nip.ccit.es")
 ODOO_DB = os.getenv("ODOO_DB", "copiaprod24-3-25")
-ODOO_API_KEY = os.getenv("ODOO_API_KEY", "ea367fca0859bfe36192197c6606a79035f7e944")
+ODOO_API_KEY = os.getenv("ODOO_API_KEY", "your-production-api-key")
 ODOO_USERNAME = os.getenv("ODOO_USERNAME", "daniel.byle@scoobic.com")
 
 # Authenticate with Odoo
@@ -29,14 +29,9 @@ uid = common.authenticate(ODOO_DB, ODOO_USERNAME, ODOO_API_KEY, {})
 # Connect to the object API
 models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
 
-# Domain filter: for now, no filtering on location, fetch all leads
 domain = []
-
-# Fields to export: we only need id, name, email_from, create_date and city.
-# (Ensure that 'city' is an actual field on your leads. If not, we may need to adjust.)
 fields = ['id', 'name', 'email_from', 'create_date', 'city']
 
-# Get all leads ordered by create_date descending
 leads = models.execute_kw(
     ODOO_DB, uid, ODOO_API_KEY,
     'crm.lead', 'search_read',
@@ -56,31 +51,29 @@ print("Field mapping (columns):")
 print(df.columns)
 print("\nSample record:")
 print(df.head(1))
-# Verify here if the 'city' field is present.
-# If not, we may need to fetch it from a related record.
 
-# Convert create_date to datetime (assuming ISO format)
 df['create_date'] = pd.to_datetime(df['create_date'])
 
 # ----------------------------
 # Part 2: Filter and Export Leads
 # ----------------------------
-# Define the "new leads" window: last 25 hours (to include a 1-hour overlap)
 now = datetime.utcnow()
 window_start = now - timedelta(hours=25)
 
-# Filter for new leads created in the last 25 hours
 new_leads = df[df['create_date'] >= window_start]
 
 if new_leads.empty:
-    print("No new leads in the last 25 hours. Using the last 10 leads instead.")
-    export_leads = df.sort_values(by='create_date', ascending=False).head(10)
+    print("No new leads in the last 25 hours.")
     no_new_leads = True
+    # Create a DataFrame with a message indicating no new deals
+    export_leads = pd.DataFrame({
+        "Message": [f"No new deals between {window_start.strftime('%Y-%m-%d %H:%M:%S')} and {now.strftime('%Y-%m-%d %H:%M:%S')}."]
+    })
 else:
     export_leads = new_leads
     no_new_leads = False
 
-# Export the filtered leads to an Excel file
+# Export the filtered leads to an Excel file (this file is always generated)
 excel_file = "leads_report.xlsx"
 export_leads.to_excel(excel_file, index=False)
 print(f"Exported leads to Excel: {excel_file}")
@@ -90,7 +83,6 @@ print(f"Exported leads to Excel: {excel_file}")
 # ----------------------------
 print("Generating graphs...")
 
-# Ensure DataFrame is sorted by date for proper resampling
 df.sort_values(by='create_date', inplace=True)
 
 # Graph 1: Daily counts for last 14 days
@@ -135,7 +127,6 @@ ax3.set_ylabel('Number of Deals')
 plt.xticks(rotation=45)
 plt.tight_layout()
 
-# Save all graphs to a single PDF file
 pdf_file = "leads_graphs.pdf"
 with PdfPages(pdf_file) as pdf:
     pdf.savefig(fig1)
@@ -149,7 +140,6 @@ print(f"Graphs saved to PDF: {pdf_file}")
 # ----------------------------
 print("Preparing email...")
 
-# Retrieve Gmail credentials from environment variables
 EMAIL_USERNAME = os.getenv("EMAIL_USERNAME")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
@@ -157,27 +147,29 @@ if not EMAIL_USERNAME or not EMAIL_PASSWORD:
     raise Exception("Gmail credentials are not set in the environment variables.")
 
 sender_email = EMAIL_USERNAME
-receiver_emails = ["dany.work.99@gmail.com", "events@scoobic.com"]
+# Updated recipient list
+receiver_emails = ["dany.work.99@gmail.com", "scoobicapps@gmail.com"]
 
-# Compose email subject and body with current date/time
 current_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+period_start_str = window_start.strftime("%Y-%m-%d %H:%M:%S UTC")
+period_end_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+
 if no_new_leads:
-    body_text = (f"Here is the daily report of leads for Scoobic as it stands today ({current_str}).\n\n"
-                 "In the defined 25-hour window, there were no new deals. Attached are the last 10 leads and the graphs.")
+    body_text = (f"Daily Leads Report ({period_start_str} to {period_end_str}):\n\n"
+                 "There have been no new deals in the specified period.\n"
+                 "Please find attached the Excel report and graphs.")
 else:
-    body_text = (f"Here is the daily report of leads for Scoobic as it stands today ({current_str}).\n\n"
+    body_text = (f"Daily Leads Report ({period_start_str} to {period_end_str}):\n\n"
                  "Please find attached the Excel report for new leads (last 25 hours) and the graphs.")
 
 subject = f"Daily Leads Report - {current_str}"
 
-# Create email message
 message = MIMEMultipart()
 message["From"] = sender_email
 message["To"] = ", ".join(receiver_emails)
 message["Subject"] = subject
 message.attach(MIMEText(body_text, "plain"))
 
-# Function to attach a file
 def attach_file(msg, filepath):
     with open(filepath, "rb") as file:
         part = MIMEBase("application", "octet-stream")
@@ -186,11 +178,10 @@ def attach_file(msg, filepath):
     part.add_header("Content-Disposition", f"attachment; filename={os.path.basename(filepath)}")
     msg.attach(part)
 
-# Attach the Excel file and PDF
+# Attach both the Excel file and the PDF
 attach_file(message, excel_file)
 attach_file(message, pdf_file)
 
-# Send email via Gmail SMTP
 print("Sending email...")
 context = ssl.create_default_context()
 with smtplib.SMTP("smtp.gmail.com", 587) as server:
