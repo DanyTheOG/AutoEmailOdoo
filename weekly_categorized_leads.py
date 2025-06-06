@@ -65,7 +65,6 @@ print(f"Excluded {excluded_count} leads (test/prueba).")
 # ----------------------------
 # Part 3: Categorize All Included Leads
 # ----------------------------
-# First, extract country name from country_id (assumes [id, "CountryName"])
 included_df['country_name'] = included_df['country_id'].apply(
     lambda x: x[1] if isinstance(x, (list, tuple)) and len(x) >= 2 else None
 )
@@ -92,23 +91,15 @@ now = datetime.utcnow()
 window_30d_start = now - timedelta(days=30)
 mask_30d = included_df['create_date'] >= window_30d_start
 df_30d = included_df[mask_30d].copy()
-
-# Compute totals for each category over last 30 days
 totals_30d = df_30d['category'].value_counts().reindex(
     ["Internacional", "Scoobic team", "Nimo"], fill_value=0
 )
 
 ### 4.2 Last 24 Months (for PDF B: monthly stacked history)
-# Build a cut-off 24 months ago
 month_24_start = (now.replace(day=1) - pd.DateOffset(months=24)).to_pydatetime()
-
 mask_24m = included_df['create_date'] >= month_24_start
 df_24m = included_df[mask_24m].copy()
-
-# Create a "year-month" column for grouping
 df_24m['year_month'] = df_24m['create_date'].dt.to_period('M').dt.to_timestamp()
-
-# Group by (year_month, category), count leads
 monthly_counts_24m = (
     df_24m
     .groupby(['year_month', 'category'])
@@ -117,17 +108,13 @@ monthly_counts_24m = (
     .reindex(columns=["Internacional", "Scoobic team", "Nimo"], fill_value=0)
     .sort_index()
 )
-
-# Drop months where all three categories are zero (if any)
 monthly_counts_24m = monthly_counts_24m[(monthly_counts_24m.sum(axis=1) > 0)]
 
 ### 4.3 Current Year (for PDF C: grouped bars by month)
 current_year = now.year
 mask_cy = included_df['create_date'].dt.year == current_year
 df_cy = included_df[mask_cy].copy()
-
 df_cy['year_month'] = df_cy['create_date'].dt.to_period('M').dt.to_timestamp()
-
 monthly_counts_cy = (
     df_cy
     .groupby(['year_month', 'category'])
@@ -136,24 +123,19 @@ monthly_counts_cy = (
     .reindex(columns=["Internacional", "Scoobic team", "Nimo"], fill_value=0)
     .sort_index()
 )
-
-# Drop months where all three categories are zero
 monthly_counts_cy = monthly_counts_cy[(monthly_counts_cy.sum(axis=1) > 0)]
 
 ### 4.4 Last 12 Months Top 3 Cities (for PDF D)
 month_12_start = (now.replace(day=1) - pd.DateOffset(months=12)).to_pydatetime()
 mask_12m = included_df['create_date'] >= month_12_start
 df_12m = included_df[mask_12m].copy()
-
-# Create year_month for city grouping
 df_12m['year_month'] = df_12m['create_date'].dt.to_period('M').dt.to_timestamp()
 
-# Prepare a dict: {year_month: DataFrame_of_top3_cities}
 top3_per_month = {}
 for ym, group in df_12m.groupby('year_month'):
     city_counts = group['city'].fillna("Unknown").value_counts()
     top_cities = city_counts.head(3)
-    top3_per_month[ym] = top_cities  # Series(index=city, value=count)
+    top3_per_month[ym] = top_cities
 
 # --------------------------------------------------------------------------------------
 # Part 5: Generate PDF A: "weekly_lead_categories_to_be_printed.pdf"
@@ -200,7 +182,7 @@ with PdfPages(pdf_B) as pdf:
             x_B,
             vals,
             bottom=bottom,
-            width=20,  # width in days—so bars don’t overlap
+            width=20,  # width in days
             align='center',
             label=cat,
             color=colors[i]
@@ -241,20 +223,24 @@ print(f"Saved: {pdf_B}")
 
 # --------------------------------------------------------------------------------------
 # Part 7: Generate PDF C: "lead_category_by_month_current_year.pdf"
+#          (with thinner bars—width=10 instead of 20)
 # --------------------------------------------------------------------------------------
 pdf_C = "lead_category_by_month_current_year.pdf"
 with PdfPages(pdf_C) as pdf:
     figC, axC = plt.subplots(figsize=(12, 6))
+
     x_C = monthly_counts_cy.index.to_pydatetime()
-    width_C = 0.25
+    width_C = 10  # reduced from 20 to 10 for thinner bars
     colors = ['tab:blue', 'tab:orange', 'tab:green']
 
     for i, cat in enumerate(["Internacional", "Scoobic team", "Nimo"]):
         vals = monthly_counts_cy[cat].values
+        # Shift each category by width_C to separate bars
+        shift_days = i * (width_C + 5)  # small gap of 5 days between categories
         bars = axC.bar(
-            x_C + pd.DateOffset(days=i * 10),  # shift each category slightly by 10 days
+            x_C + pd.DateOffset(days=shift_days),
             vals,
-            width=20,
+            width=width_C,
             align='center',
             label=cat,
             color=colors[i]
@@ -274,13 +260,11 @@ with PdfPages(pdf_C) as pdf:
     axC.set_title(title_C)
     axC.set_xlabel("Month")
     axC.set_ylabel("Number of Leads")
+    # Position x-ticks at the center of the three-bar group
+    xtick_positions = [dt + pd.DateOffset(days=width_C) for dt in x_C]
+    axC.set_xticks(xtick_positions)
+    axC.set_xticklabels([dt.strftime("%Y-%m") for dt in x_C], rotation=45, fontsize=8)
     axC.legend()
-    plt.xticks(
-        x_C + pd.DateOffset(days=10),
-        [dt.strftime("%Y-%m") for dt in x_C],
-        rotation=45,
-        fontsize=8
-    )
     plt.tight_layout()
     pdf.savefig(figC)
     plt.close(figC)
@@ -293,38 +277,31 @@ pdf_D = "top3_cities_last_12_months.pdf"
 with PdfPages(pdf_D) as pdf:
     figD, axD = plt.subplots(figsize=(14, 6))
 
-    # Build data structure for plotting:
-    # We will create three side-by-side bars for each month (if that month has ≥1 city).
     x_positions = []
     heights = []
     labels = []
-    colors_map = {}  # map city->color index
+    colors_map = {}
     color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
     next_color_idx = 0
 
-    # Iterate months in chronological order
     sorted_months = sorted(top3_per_month.keys())
     for idx_m, ym in enumerate(sorted_months):
         top_cities = top3_per_month[ym]
-        x_base = idx_m * 4  # leave a gap of 1 unit between months
+        x_base = idx_m * 4  # gap of 1 unit between months
         for i, (city, count) in enumerate(top_cities.items()):
             x_positions.append(x_base + i)
             heights.append(count)
             labels.append(f"{ym.strftime('%Y-%m')}\n{city}")
-
-            # assign a color index to each city if not already assigned
             if city not in colors_map:
                 colors_map[city] = next_color_idx % len(color_cycle)
                 next_color_idx += 1
 
-    # Now plot all bars
     bars = axD.bar(
         x_positions,
         heights,
         color=[color_cycle[colors_map[labels[i].split('\n', 1)[1]]] for i in range(len(labels))]
     )
 
-    # Annotate each bar
     for bar, h in zip(bars, heights):
         axD.text(
             bar.get_x() + bar.get_width() / 2,
@@ -367,7 +344,7 @@ body_text = (
     "Attached:\n"
     f" • {pdf_A}  (30-day summary — 3-bar)\n"
     f" • {pdf_B}  (Last 24 months — stacked by month)\n"
-    f" • {pdf_C}  (Current year — grouped by month)\n"
+    f" • {pdf_C}  (Current year — grouped by month, thinner bars)\n"
     f" • {pdf_D}  (Last 12 months — top 3 cities per month)\n\n"
     "Regards,\nAutomated Report System"
 )
@@ -389,7 +366,6 @@ def attach_file(msg, filepath):
     )
     msg.attach(part)
 
-# Attach the four new PDFs
 for pdf_file in [pdf_A, pdf_B, pdf_C, pdf_D]:
     attach_file(message, pdf_file)
 
