@@ -1,5 +1,3 @@
-# weekly_categorized_leads.py
-
 import xmlrpc.client
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -33,7 +31,7 @@ uid = common.authenticate(ODOO_DB, ODOO_USERNAME, ODOO_API_KEY, {})
 models = xmlrpc.client.ServerProxy(f"{ODOO_URL}/xmlrpc/2/object")
 
 fields = ['id', 'name', 'email_from', 'create_date', 'city', 'country_id']
-domain = []  # no extra domain, fetch all leads
+domain = []  # fetch all leads
 
 leads = models.execute_kw(
     ODOO_DB, uid, ODOO_API_KEY,
@@ -63,13 +61,13 @@ included_df = df[~mask_exclude].copy()
 excluded_count = len(excluded_df)
 print(f"Excluded {excluded_count} leads (test/prueba).")
 
-# Build a 30‐day window
+# Build a 30‐day window (UTC)
 now = datetime.utcnow()
 window_start = now - timedelta(days=30)
 window_mask = included_df['create_date'] >= window_start
 window_df = included_df[window_mask].copy()
 
-# Extract country name from country_id list [id, name]
+# Extract country name from country_id (assumes [id, "CountryName"])
 window_df['country_name'] = window_df['country_id'].apply(
     lambda x: x[1] if isinstance(x, (list, tuple)) and len(x) >= 2 else None
 )
@@ -100,11 +98,13 @@ print(f"Exported categorized leads to CSV: {csv_filename}")
 # ----------------------------
 # Part 5: Build Daily Counts per Category
 # ----------------------------
-# Create a date index with one row per day for the last 30 days
-all_days = pd.date_range(start=pd.to_datetime(window_start).normalize(), end=pd.to_datetime(now).normalize(), freq='D')
+# Create a date index for each day in the last 30 days (normalized to midnight)
+start_date = pd.to_datetime(window_start).normalize()
+end_date = pd.to_datetime(now).normalize()
+all_days = pd.date_range(start=start_date, end=end_date, freq='D')
+
 counts_df = pd.DataFrame(index=all_days)
 
-# For each category, compute daily counts
 for cat in ["Foreign", "Presupuestador", "Normal"]:
     tmp = window_df[window_df['category'] == cat].copy()
     tmp.set_index('create_date', inplace=True)
@@ -117,11 +117,12 @@ counts_df = counts_df.fillna(0).astype(int)
 # Part 6: Generate PDF with Two Charts
 # ----------------------------
 pdf_filename = "weekly_lead_types.pdf"
+
 with PdfPages(pdf_filename) as pdf:
     # 6A: Stacked Bar Chart
     fig, ax = plt.subplots(figsize=(12, 6))
     bottom = np.zeros(len(all_days))
-    colors = ['tab:blue', 'tab:orange', 'tab:green']  # you can adjust if you like
+    colors = ['tab:blue', 'tab:orange', 'tab:green']
 
     for i, cat in enumerate(["Foreign", "Normal", "Presupuestador"]):
         vals = counts_df[cat].values
@@ -132,20 +133,25 @@ with PdfPages(pdf_filename) as pdf:
             label=cat,
             color=colors[i]
         )
+
         # Annotate each segment with its count
-        for bar, count in zip(bars, vals):
+        for idx, bar in enumerate(bars):
+            count = vals[idx]
             if count > 0:
-                height = bar.get_height()
+                # bar.get_x() is the left edge; bar.get_width() is the width.
+                x_center = bar.get_x() + bar.get_width() / 2
+                y_center = bottom[idx] + count / 2
                 ax.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    bar.get_y() + height / 2 + bottom[list(all_days).index(bar.get_x().astype('M8[ns]'))],
+                    x_center,
+                    y_center,
                     str(count),
                     ha='center',
                     va='center',
                     fontsize=8,
-                    color='white' if height > 0 else 'black'
+                    color='white'
                 )
-        bottom += vals
+
+        bottom += vals  # stack the next category on top
 
     ax.set_title("Daily Leads by Category (Last 30 Days) – Stacked")
     ax.set_xlabel("Date")
@@ -158,18 +164,19 @@ with PdfPages(pdf_filename) as pdf:
 
     # 6B: Grouped Bar Chart
     fig2, ax2 = plt.subplots(figsize=(12, 6))
-    width = 0.25
-    x = np.arange(len(all_days))
+    width = 0.28
+    x_indices = np.arange(len(all_days))
 
     for i, cat in enumerate(["Foreign", "Normal", "Presupuestador"]):
         vals = counts_df[cat].values
         bars = ax2.bar(
-            x + i * width,
+            x_indices + i * width,
             vals,
             width=width,
             label=cat,
             color=colors[i]
         )
+
         # Annotate each bar
         for bar, count in zip(bars, vals):
             if count > 0:
@@ -185,7 +192,7 @@ with PdfPages(pdf_filename) as pdf:
     ax2.set_title("Daily Leads by Category (Last 30 Days) – Grouped")
     ax2.set_xlabel("Date")
     ax2.set_ylabel("Number of Leads")
-    ax2.set_xticks(x + width)
+    ax2.set_xticks(x_indices + width)
     ax2.set_xticklabels([d.strftime("%Y-%m-%d") for d in all_days], rotation=45, fontsize=7)
     ax2.legend()
     plt.tight_layout()
