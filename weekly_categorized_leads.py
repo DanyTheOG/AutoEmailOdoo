@@ -1,3 +1,5 @@
+# weekly_categorized_leads.py
+
 import xmlrpc.client
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -44,12 +46,12 @@ print(f"Fetched {len(leads)} leads from Odoo.")
 df = pd.DataFrame(leads)
 
 # ----------------------------
-# Part 2: Pre‐filtering & cleaning
+# Part 2: Pre-filtering & cleaning
 # ----------------------------
 # Convert create_date to datetime
 df['create_date'] = pd.to_datetime(df['create_date'])
 
-# Drop any rows where name or email_from contain "test" or "prueba" (case‐insensitive)
+# Drop any rows where name or email_from contain "test" or "prueba" (case-insensitive)
 mask_exclude = (
     df['name'].str.lower().str.contains("test", na=False) |
     df['name'].str.lower().str.contains("prueba", na=False) |
@@ -61,7 +63,7 @@ included_df = df[~mask_exclude].copy()
 excluded_count = len(excluded_df)
 print(f"Excluded {excluded_count} leads (test/prueba).")
 
-# Build a 30‐day window (UTC)
+# Build a 30-day window (UTC)
 now = datetime.utcnow()
 window_start = now - timedelta(days=30)
 window_mask = included_df['create_date'] >= window_start
@@ -114,8 +116,9 @@ for cat in ["Foreign", "Presupuestador", "Normal"]:
 counts_df = counts_df.fillna(0).astype(int)
 
 # ----------------------------
-# Part 6: Generate PDF with Two Charts
+# Part 6: Generate PDF with Charts
 # ----------------------------
+# (a) Existing stacked & grouped charts
 pdf_filename = "weekly_lead_types.pdf"
 
 with PdfPages(pdf_filename) as pdf:
@@ -138,7 +141,6 @@ with PdfPages(pdf_filename) as pdf:
         for idx, bar in enumerate(bars):
             count = vals[idx]
             if count > 0:
-                # bar.get_x() is the left edge; bar.get_width() is the width.
                 x_center = bar.get_x() + bar.get_width() / 2
                 y_center = bottom[idx] + count / 2
                 ax.text(
@@ -199,10 +201,48 @@ with PdfPages(pdf_filename) as pdf:
     pdf.savefig(fig2)
     plt.close(fig2)
 
-print(f"PDF with charts saved: {pdf_filename}")
+print(f"PDF with stacked & grouped charts saved: {pdf_filename}")
+
+# --------
+# (b) New single bar‐chart “to be printed”
+# --------
+# Sum up totals over 30 days for each category
+totals = {
+    "Foreign": counts_df["Foreign"].sum(),
+    "Normal": counts_df["Normal"].sum(),
+    "Presupuestador": counts_df["Presupuestador"].sum()
+}
+
+# Map to the requested nomenclature
+labels = ["Internacional", "Scoobic team", "Nimo"]
+values = [totals["Foreign"], totals["Normal"], totals["Presupuestador"]]
+
+fig3, ax3 = plt.subplots(figsize=(8, 6))
+bars = ax3.bar(labels, values, color=['tab:blue', 'tab:orange', 'tab:green'])
+
+# Annotate each bar with its count
+for bar, v in zip(bars, values):
+    ax3.text(
+        bar.get_x() + bar.get_width() / 2,
+        v + 0.1,
+        str(v),
+        ha='center',
+        va='bottom',
+        fontsize=10
+    )
+
+ax3.set_title("Total Leads by Category (Last 30 Days)")
+ax3.set_ylabel("Number of Leads")
+plt.tight_layout()
+
+new_pdf = "weekly_lead_categories_to_be_printed.pdf"
+fig3.savefig(new_pdf)
+plt.close(fig3)
+
+print(f"Summary PDF (3-bar chart) saved: {new_pdf}")
 
 # ----------------------------
-# Part 7: Send Email with CSV + PDF
+# Part 7: Send Email with CSV + PDFs
 # ----------------------------
 EMAIL_USERNAME = os.getenv("EMAIL_USERNAME")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
@@ -220,7 +260,8 @@ body_text = (
     f"- Total included (last 30 days): {len(window_df)}\n\n"
     "Attached:\n"
     f" • {csv_filename}  (all filtered & categorized leads)\n"
-    f" • {pdf_filename}  (stacked & grouped bar charts)\n\n"
+    f" • {pdf_filename}  (stacked & grouped bar charts)\n"
+    f" • {new_pdf}  (single 3-bar summary chart — ‘to be printed’)\n\n"
     "Regards,\nAutomated Report System"
 )
 
@@ -241,10 +282,12 @@ def attach_file(msg, filepath):
     )
     msg.attach(part)
 
+# Attach the three files
 attach_file(message, csv_filename)
 attach_file(message, pdf_filename)
+attach_file(message, new_pdf)
 
-print("Sending weekly email...")
+print("Sending weekly email with all attachments...")
 context = ssl.create_default_context()
 with smtplib.SMTP("smtp.gmail.com", 587) as server:
     server.starttls(context=context)
