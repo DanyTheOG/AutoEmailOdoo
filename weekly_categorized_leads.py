@@ -101,7 +101,7 @@ print(f"Exported categorized leads to CSV: {csv_filename}")
 # Part 5: Build Daily Counts per Category
 # ----------------------------
 # Create a date index with one row per day for the last 30 days
-all_days = pd.date_range(start=window_start.normalize(), end=now.normalize(), freq='D')
+all_days = pd.date_range(start=pd.to_datetime(window_start).normalize(), end=pd.to_datetime(now).normalize(), freq='D')
 counts_df = pd.DataFrame(index=all_days)
 
 # For each category, compute daily counts
