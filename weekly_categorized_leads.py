@@ -225,26 +225,33 @@ print(f"Saved: {pdf_B}")
 # Part 7: Generate PDF C: "lead_category_by_month_current_year.pdf"
 #          (with thinner bars—width=10 instead of 20)
 # --------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
+# Part 7: Generate PDF C: "lead_category_by_month_current_year.pdf"
+#            (using numeric x-positions for truly grouped bars)
+# --------------------------------------------------------------------------------------
 pdf_C = "lead_category_by_month_current_year.pdf"
 with PdfPages(pdf_C) as pdf:
     figC, axC = plt.subplots(figsize=(12, 6))
 
-    x_C = monthly_counts_cy.index.to_pydatetime()
-    width_C = 10  # reduced from 20 to 10 for thinner bars
+    # 1) Prepare the “months” and counts
+    months = monthly_counts_cy.index.to_pydatetime()           # array of Timestamp objects
+    month_labels = [dt.strftime("%Y-%m") for dt in months]      # e.g. ["2025-01", "2025-02", ...]
+    x_pos = np.arange(len(months))                              # [0, 1, 2, 3, ...]
+
+    width = 0.25  # width of each bar
     colors = ['tab:blue', 'tab:orange', 'tab:green']
 
+    # 2) Plot each category at x_pos + i*width
     for i, cat in enumerate(["Internacional", "Scoobic team", "Nimo"]):
         vals = monthly_counts_cy[cat].values
-        # Shift each category by width_C to separate bars
-        shift_days = i * (width_C + 5)  # small gap of 5 days between categories
         bars = axC.bar(
-            x_C + pd.DateOffset(days=shift_days),
+            x_pos + i * width,
             vals,
-            width=width_C,
-            align='center',
+            width=width,
             label=cat,
             color=colors[i]
         )
+        # Annotate counts above each bar
         for bar, count in zip(bars, vals):
             if count > 0:
                 axC.text(
@@ -256,19 +263,23 @@ with PdfPages(pdf_C) as pdf:
                     fontsize=7
                 )
 
+    # 3) Center x-ticks under the three bars per month
+    axC.set_xticks(x_pos + width)                # center of the three-group
+    axC.set_xticklabels(month_labels, rotation=45, fontsize=8)
+
+    # 4) Titles, legend, labels
     title_C = f"Current Year Leads by Category ({current_year}) (Generated {now.strftime('%Y-%m-%d')})"
     axC.set_title(title_C)
     axC.set_xlabel("Month")
     axC.set_ylabel("Number of Leads")
-    # Position x-ticks at the center of the three-bar group
-    xtick_positions = [dt + pd.DateOffset(days=width_C) for dt in x_C]
-    axC.set_xticks(xtick_positions)
-    axC.set_xticklabels([dt.strftime("%Y-%m") for dt in x_C], rotation=45, fontsize=8)
     axC.legend()
+
     plt.tight_layout()
     pdf.savefig(figC)
     plt.close(figC)
+
 print(f"Saved: {pdf_C}")
+
 
 # --------------------------------------------------------------------------------------
 # Part 8: Generate PDF D: "top3_cities_last_12_months.pdf"
