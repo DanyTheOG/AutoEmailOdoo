@@ -3,6 +3,7 @@
 import xmlrpc.client
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 import smtplib
 import ssl
@@ -12,7 +13,6 @@ from email.mime.base import MIMEBase
 from email import encoders
 import os
 from datetime import datetime, timedelta
-import numpy as np
 
 # ----------------------------
 # Part 1: Fetch Odoo Data
@@ -46,12 +46,11 @@ print(f"Fetched {len(leads)} leads from Odoo.")
 df = pd.DataFrame(leads)
 
 # ----------------------------
-# Part 2: Pre-filtering & cleaning
+# Part 2: Pre-filtering & Cleaning
 # ----------------------------
-# Convert create_date to datetime
 df['create_date'] = pd.to_datetime(df['create_date'])
 
-# Drop any rows where name or email_from contain "test" or "prueba" (case-insensitive)
+# Exclude leads whose name or email_from contain "test" or "prueba" (case-insensitive)
 mask_exclude = (
     df['name'].str.lower().str.contains("test", na=False) |
     df['name'].str.lower().str.contains("prueba", na=False) |
@@ -63,87 +62,156 @@ included_df = df[~mask_exclude].copy()
 excluded_count = len(excluded_df)
 print(f"Excluded {excluded_count} leads (test/prueba).")
 
-# Build a 30-day window (UTC)
-now = datetime.utcnow()
-window_start = now - timedelta(days=30)
-window_mask = included_df['create_date'] >= window_start
-window_df = included_df[window_mask].copy()
-
-# Extract country name from country_id (assumes [id, "CountryName"])
-window_df['country_name'] = window_df['country_id'].apply(
+# ----------------------------
+# Part 3: Categorize All Included Leads
+# ----------------------------
+# First, extract country name from country_id (assumes [id, "CountryName"])
+included_df['country_name'] = included_df['country_id'].apply(
     lambda x: x[1] if isinstance(x, (list, tuple)) and len(x) >= 2 else None
 )
 
-# ----------------------------
-# Part 3: Categorize leads
-# ----------------------------
 def categorize(row):
     cname = row['country_name']
     nm_lower = (row['name'] or "").strip().lower()
     if cname not in ["Spain", "Portugal"]:
-        return "Foreign"
+        return "Internacional"
     elif nm_lower.startswith("presupuestador"):
-        return "Presupuestador"
+        return "Nimo"
     else:
-        return "Normal"
+        return "Scoobic team"
 
-window_df['category'] = window_df.apply(categorize, axis=1)
+included_df['category'] = included_df.apply(categorize, axis=1)
 
-# ----------------------------
-# Part 4: Save CSV of filtered + categorized leads
-# ----------------------------
-csv_filename = "weekly_leads_categorized.csv"
-export_cols = ['id', 'name', 'email_from', 'create_date', 'city', 'country_name', 'category']
-window_df.to_csv(csv_filename, index=False)
-print(f"Exported categorized leads to CSV: {csv_filename}")
+# --------------------------------------------------------------------------------------
+# Part 4: Time-Windowed Subsets & Data Preprocessing for Charts
+# --------------------------------------------------------------------------------------
 
-# ----------------------------
-# Part 5: Build Daily Counts per Category
-# ----------------------------
-# Create a date index for each day in the last 30 days (normalized to midnight)
-start_date = pd.to_datetime(window_start).normalize()
-end_date = pd.to_datetime(now).normalize()
-all_days = pd.date_range(start=start_date, end=end_date, freq='D')
+now = datetime.utcnow()
 
-counts_df = pd.DataFrame(index=all_days)
+### 4.1 Last 30 Days (for PDF A: 3-bar “to be printed”)
+window_30d_start = now - timedelta(days=30)
+mask_30d = included_df['create_date'] >= window_30d_start
+df_30d = included_df[mask_30d].copy()
 
-for cat in ["Foreign", "Presupuestador", "Normal"]:
-    tmp = window_df[window_df['category'] == cat].copy()
-    tmp.set_index('create_date', inplace=True)
-    daily_counts = tmp['id'].resample('D').count()
-    counts_df[cat] = daily_counts.reindex(all_days, fill_value=0)
+# Compute totals for each category over last 30 days
+totals_30d = df_30d['category'].value_counts().reindex(
+    ["Internacional", "Scoobic team", "Nimo"], fill_value=0
+)
 
-counts_df = counts_df.fillna(0).astype(int)
+### 4.2 Last 24 Months (for PDF B: monthly stacked history)
+# Build a cut-off 24 months ago
+month_24_start = (now.replace(day=1) - pd.DateOffset(months=24)).to_pydatetime()
 
-# ----------------------------
-# Part 6: Generate PDF with Charts
-# ----------------------------
-# (a) Existing stacked & grouped charts
-pdf_filename = "weekly_lead_types.pdf"
+mask_24m = included_df['create_date'] >= month_24_start
+df_24m = included_df[mask_24m].copy()
 
-with PdfPages(pdf_filename) as pdf:
-    # 6A: Stacked Bar Chart
-    fig, ax = plt.subplots(figsize=(12, 6))
-    bottom = np.zeros(len(all_days))
+# Create a "year-month" column for grouping
+df_24m['year_month'] = df_24m['create_date'].dt.to_period('M').dt.to_timestamp()
+
+# Group by (year_month, category), count leads
+monthly_counts_24m = (
+    df_24m
+    .groupby(['year_month', 'category'])
+    .size()
+    .unstack(fill_value=0)
+    .reindex(columns=["Internacional", "Scoobic team", "Nimo"], fill_value=0)
+    .sort_index()
+)
+
+# Drop months where all three categories are zero (if any)
+monthly_counts_24m = monthly_counts_24m[(monthly_counts_24m.sum(axis=1) > 0)]
+
+### 4.3 Current Year (for PDF C: grouped bars by month)
+current_year = now.year
+mask_cy = included_df['create_date'].dt.year == current_year
+df_cy = included_df[mask_cy].copy()
+
+df_cy['year_month'] = df_cy['create_date'].dt.to_period('M').dt.to_timestamp()
+
+monthly_counts_cy = (
+    df_cy
+    .groupby(['year_month', 'category'])
+    .size()
+    .unstack(fill_value=0)
+    .reindex(columns=["Internacional", "Scoobic team", "Nimo"], fill_value=0)
+    .sort_index()
+)
+
+# Drop months where all three categories are zero
+monthly_counts_cy = monthly_counts_cy[(monthly_counts_cy.sum(axis=1) > 0)]
+
+### 4.4 Last 12 Months Top 3 Cities (for PDF D)
+month_12_start = (now.replace(day=1) - pd.DateOffset(months=12)).to_pydatetime()
+mask_12m = included_df['create_date'] >= month_12_start
+df_12m = included_df[mask_12m].copy()
+
+# Create year_month for city grouping
+df_12m['year_month'] = df_12m['create_date'].dt.to_period('M').dt.to_timestamp()
+
+# Prepare a dict: {year_month: DataFrame_of_top3_cities}
+top3_per_month = {}
+for ym, group in df_12m.groupby('year_month'):
+    city_counts = group['city'].fillna("Unknown").value_counts()
+    top_cities = city_counts.head(3)
+    top3_per_month[ym] = top_cities  # Series(index=city, value=count)
+
+# --------------------------------------------------------------------------------------
+# Part 5: Generate PDF A: "weekly_lead_categories_to_be_printed.pdf"
+# --------------------------------------------------------------------------------------
+pdf_A = "weekly_lead_categories_to_be_printed.pdf"
+figA, axA = plt.subplots(figsize=(8, 6))
+
+labels_A = ["Internacional", "Scoobic team", "Nimo"]
+values_A = [totals_30d[label] for label in labels_A]
+barsA = axA.bar(labels_A, values_A, color=['tab:blue', 'tab:orange', 'tab:green'])
+
+for bar, v in zip(barsA, values_A):
+    axA.text(
+        bar.get_x() + bar.get_width() / 2,
+        v + 0.1,
+        str(v),
+        ha='center',
+        va='bottom',
+        fontsize=10
+    )
+
+title_A = f"30-Day Total Leads by Category (Generated {now.strftime('%Y-%m-%d')})"
+axA.set_title(title_A)
+axA.set_ylabel("Number of Leads")
+plt.tight_layout()
+figA.savefig(pdf_A)
+plt.close(figA)
+print(f"Saved: {pdf_A}")
+
+# --------------------------------------------------------------------------------------
+# Part 6: Generate PDF B: "lead_history_by_month.pdf"
+# --------------------------------------------------------------------------------------
+pdf_B = "lead_history_by_month.pdf"
+with PdfPages(pdf_B) as pdf:
+    figB, axB = plt.subplots(figsize=(12, 6))
+
+    bottom = np.zeros(len(monthly_counts_24m))
+    x_B = monthly_counts_24m.index.to_pydatetime()
     colors = ['tab:blue', 'tab:orange', 'tab:green']
 
-    for i, cat in enumerate(["Foreign", "Normal", "Presupuestador"]):
-        vals = counts_df[cat].values
-        bars = ax.bar(
-            all_days,
+    for i, cat in enumerate(["Internacional", "Scoobic team", "Nimo"]):
+        vals = monthly_counts_24m[cat].values
+        bars = axB.bar(
+            x_B,
             vals,
             bottom=bottom,
+            width=20,  # width in days—so bars don’t overlap
+            align='center',
             label=cat,
             color=colors[i]
         )
 
-        # Annotate each segment with its count
         for idx, bar in enumerate(bars):
             count = vals[idx]
             if count > 0:
                 x_center = bar.get_x() + bar.get_width() / 2
                 y_center = bottom[idx] + count / 2
-                ax.text(
+                axB.text(
                     x_center,
                     y_center,
                     str(count),
@@ -153,36 +221,47 @@ with PdfPages(pdf_filename) as pdf:
                     color='white'
                 )
 
-        bottom += vals  # stack the next category on top
+        bottom += vals
 
-    ax.set_title("Daily Leads by Category (Last 30 Days) – Stacked")
-    ax.set_xlabel("Date")
-    ax.set_ylabel("Number of Leads")
-    ax.legend()
-    plt.xticks(rotation=45)
+    title_B = f"Monthly Leads by Category (Last 24 Months) (Generated {now.strftime('%Y-%m-%d')})"
+    axB.set_title(title_B)
+    axB.set_xlabel("Month")
+    axB.set_ylabel("Number of Leads")
+    axB.legend()
+    plt.xticks(
+        x_B,
+        [dt.strftime("%Y-%m") for dt in x_B],
+        rotation=45,
+        fontsize=8
+    )
     plt.tight_layout()
-    pdf.savefig(fig)
-    plt.close(fig)
+    pdf.savefig(figB)
+    plt.close(figB)
+print(f"Saved: {pdf_B}")
 
-    # 6B: Grouped Bar Chart
-    fig2, ax2 = plt.subplots(figsize=(12, 6))
-    width = 0.28
-    x_indices = np.arange(len(all_days))
+# --------------------------------------------------------------------------------------
+# Part 7: Generate PDF C: "lead_category_by_month_current_year.pdf"
+# --------------------------------------------------------------------------------------
+pdf_C = "lead_category_by_month_current_year.pdf"
+with PdfPages(pdf_C) as pdf:
+    figC, axC = plt.subplots(figsize=(12, 6))
+    x_C = monthly_counts_cy.index.to_pydatetime()
+    width_C = 0.25
+    colors = ['tab:blue', 'tab:orange', 'tab:green']
 
-    for i, cat in enumerate(["Foreign", "Normal", "Presupuestador"]):
-        vals = counts_df[cat].values
-        bars = ax2.bar(
-            x_indices + i * width,
+    for i, cat in enumerate(["Internacional", "Scoobic team", "Nimo"]):
+        vals = monthly_counts_cy[cat].values
+        bars = axC.bar(
+            x_C + pd.DateOffset(days=i * 10),  # shift each category slightly by 10 days
             vals,
-            width=width,
+            width=20,
+            align='center',
             label=cat,
             color=colors[i]
         )
-
-        # Annotate each bar
         for bar, count in zip(bars, vals):
             if count > 0:
-                ax2.text(
+                axC.text(
                     bar.get_x() + bar.get_width() / 2,
                     bar.get_height() + 0.1,
                     str(count),
@@ -191,59 +270,89 @@ with PdfPages(pdf_filename) as pdf:
                     fontsize=7
                 )
 
-    ax2.set_title("Daily Leads by Category (Last 30 Days) – Grouped")
-    ax2.set_xlabel("Date")
-    ax2.set_ylabel("Number of Leads")
-    ax2.set_xticks(x_indices + width)
-    ax2.set_xticklabels([d.strftime("%Y-%m-%d") for d in all_days], rotation=45, fontsize=7)
-    ax2.legend()
+    title_C = f"Current Year Leads by Category ({current_year}) (Generated {now.strftime('%Y-%m-%d')})"
+    axC.set_title(title_C)
+    axC.set_xlabel("Month")
+    axC.set_ylabel("Number of Leads")
+    axC.legend()
+    plt.xticks(
+        x_C + pd.DateOffset(days=10),
+        [dt.strftime("%Y-%m") for dt in x_C],
+        rotation=45,
+        fontsize=8
+    )
     plt.tight_layout()
-    pdf.savefig(fig2)
-    plt.close(fig2)
+    pdf.savefig(figC)
+    plt.close(figC)
+print(f"Saved: {pdf_C}")
 
-print(f"PDF with stacked & grouped charts saved: {pdf_filename}")
+# --------------------------------------------------------------------------------------
+# Part 8: Generate PDF D: "top3_cities_last_12_months.pdf"
+# --------------------------------------------------------------------------------------
+pdf_D = "top3_cities_last_12_months.pdf"
+with PdfPages(pdf_D) as pdf:
+    figD, axD = plt.subplots(figsize=(14, 6))
 
-# --------
-# (b) New single bar‐chart “to be printed”
-# --------
-# Sum up totals over 30 days for each category
-totals = {
-    "Foreign": counts_df["Foreign"].sum(),
-    "Normal": counts_df["Normal"].sum(),
-    "Presupuestador": counts_df["Presupuestador"].sum()
-}
+    # Build data structure for plotting:
+    # We will create three side-by-side bars for each month (if that month has ≥1 city).
+    x_positions = []
+    heights = []
+    labels = []
+    colors_map = {}  # map city->color index
+    color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    next_color_idx = 0
 
-# Map to the requested nomenclature
-labels = ["Internacional", "Scoobic team", "Nimo"]
-values = [totals["Foreign"], totals["Normal"], totals["Presupuestador"]]
+    # Iterate months in chronological order
+    sorted_months = sorted(top3_per_month.keys())
+    for idx_m, ym in enumerate(sorted_months):
+        top_cities = top3_per_month[ym]
+        x_base = idx_m * 4  # leave a gap of 1 unit between months
+        for i, (city, count) in enumerate(top_cities.items()):
+            x_positions.append(x_base + i)
+            heights.append(count)
+            labels.append(f"{ym.strftime('%Y-%m')}\n{city}")
 
-fig3, ax3 = plt.subplots(figsize=(8, 6))
-bars = ax3.bar(labels, values, color=['tab:blue', 'tab:orange', 'tab:green'])
+            # assign a color index to each city if not already assigned
+            if city not in colors_map:
+                colors_map[city] = next_color_idx % len(color_cycle)
+                next_color_idx += 1
 
-# Annotate each bar with its count
-for bar, v in zip(bars, values):
-    ax3.text(
-        bar.get_x() + bar.get_width() / 2,
-        v + 0.1,
-        str(v),
-        ha='center',
-        va='bottom',
-        fontsize=10
+    # Now plot all bars
+    bars = axD.bar(
+        x_positions,
+        heights,
+        color=[color_cycle[colors_map[labels[i].split('\n', 1)[1]]] for i in range(len(labels))]
     )
 
-ax3.set_title("Total Leads by Category (Last 30 Days)")
-ax3.set_ylabel("Number of Leads")
-plt.tight_layout()
+    # Annotate each bar
+    for bar, h in zip(bars, heights):
+        axD.text(
+            bar.get_x() + bar.get_width() / 2,
+            h + 0.5,
+            str(h),
+            ha='center',
+            va='bottom',
+            fontsize=7
+        )
 
-new_pdf = "weekly_lead_categories_to_be_printed.pdf"
-fig3.savefig(new_pdf)
-plt.close(fig3)
+    title_D = f"Top 3 Cities per Month (Last 12 Months) (Generated {now.strftime('%Y-%m-%d')})"
+    axD.set_title(title_D)
+    axD.set_ylabel("Number of Leads")
+    plt.xticks(
+        x_positions,
+        labels,
+        rotation=45,
+        ha='right',
+        fontsize=7
+    )
+    plt.tight_layout()
+    pdf.savefig(figD)
+    plt.close(figD)
+print(f"Saved: {pdf_D}")
 
-print(f"Summary PDF (3-bar chart) saved: {new_pdf}")
-
-# ----------------------------
-# Part 7: Send Email with CSV + PDFs
-# ----------------------------
+# --------------------------------------------------------------------------------------
+# Part 9: Send Email with All Four PDFs
+# --------------------------------------------------------------------------------------
 EMAIL_USERNAME = os.getenv("EMAIL_USERNAME")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 
@@ -251,17 +360,15 @@ if not EMAIL_USERNAME or not EMAIL_PASSWORD:
     raise Exception("Gmail credentials are not set in the environment variables.")
 
 receiver_emails = ["dany.work.99@gmail.com", "scoobicapps@gmail.com"]
-subject = f"Weekly Categorized Leads Report - {now.strftime('%Y-%m-%d')}"
+subject = f"Weekly Leads & History Report - {now.strftime('%Y-%m-%d')}"
 
 body_text = (
-    f"Weekly Categorized Leads Report ({window_start.strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')}):\n\n"
-    f"- Total leads fetched: {len(leads)}\n"
-    f"- Total excluded (\"test\"/\"prueba\"): {excluded_count}\n"
-    f"- Total included (last 30 days): {len(window_df)}\n\n"
+    f"Weekly Leads & History Report (Generated {now.strftime('%Y-%m-%d')}):\n\n"
     "Attached:\n"
-    f" • {csv_filename}  (all filtered & categorized leads)\n"
-    f" • {pdf_filename}  (stacked & grouped bar charts)\n"
-    f" • {new_pdf}  (single 3-bar summary chart — ‘to be printed’)\n\n"
+    f" • {pdf_A}  (30-day summary — 3-bar)\n"
+    f" • {pdf_B}  (Last 24 months — stacked by month)\n"
+    f" • {pdf_C}  (Current year — grouped by month)\n"
+    f" • {pdf_D}  (Last 12 months — top 3 cities per month)\n\n"
     "Regards,\nAutomated Report System"
 )
 
@@ -282,16 +389,15 @@ def attach_file(msg, filepath):
     )
     msg.attach(part)
 
-# Attach the three files
-attach_file(message, csv_filename)
-attach_file(message, pdf_filename)
-attach_file(message, new_pdf)
+# Attach the four new PDFs
+for pdf_file in [pdf_A, pdf_B, pdf_C, pdf_D]:
+    attach_file(message, pdf_file)
 
-print("Sending weekly email with all attachments...")
+print("Sending email with all four PDFs...")
 context = ssl.create_default_context()
 with smtplib.SMTP("smtp.gmail.com", 587) as server:
     server.starttls(context=context)
     server.login(EMAIL_USERNAME, EMAIL_PASSWORD)
     server.sendmail(EMAIL_USERNAME, receiver_emails, message.as_string())
 
-print("Weekly email sent successfully!")
+print("Email sent successfully!")
