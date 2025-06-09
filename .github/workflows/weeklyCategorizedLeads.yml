@@ -1,10 +1,10 @@
-# .github/workflows/weeklyCategorizedLeads.yml
-name: Weekly Categorized Leads Report
+# .github/workflows/monthlyCategorizedLeads.yml
+name: Monthly Categorized Leads Report
 
 on:
   schedule:
-    - cron: '0 6 * * MON'
-  workflow_dispatch:
+    - cron: '0 6 1 * *'    # → 06:00 UTC on the 1st of every month
+  workflow_dispatch:        # allows you to trigger it manually
 
 jobs:
   build:
@@ -24,12 +24,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run weekly_categorized_leads.py
+      - name: Run monthly report script
         env:
           EMAIL_USERNAME: ${{ secrets.EMAIL_USERNAME }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          ODOO_URL: ${{ secrets.ODOO_URL }}
-          ODOO_DB: ${{ secrets.ODOO_DB }}
-          ODOO_API_KEY: ${{ secrets.ODOO_API_KEY }}
+          ODOO_URL:      ${{ secrets.ODOO_URL }}
+          ODOO_DB:       ${{ secrets.ODOO_DB }}
+          ODOO_API_KEY:  ${{ secrets.ODOO_API_KEY }}
           ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
-        run: python weekly_categorized_leads.py
+        run: python weekly_categorized_leads.py   # same script, now executed monthly
