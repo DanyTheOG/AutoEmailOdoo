@@ -160,7 +160,7 @@ if not EMAIL_USERNAME or not EMAIL_PASSWORD:
 
 sender_email = EMAIL_USERNAME
 # Updated recipient list
-receiver_emails = ["dany.work.99@gmail.com", "scoobicapps@gmail.com"]
+receiver_emails = ["dany.work.99@gmail.com", "antonio.suarez@scoobic.com", "scoobicapps@gmail.com"]
 
 current_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
 period_start_str = window_start.strftime("%Y-%m-%d %H:%M:%S UTC")
