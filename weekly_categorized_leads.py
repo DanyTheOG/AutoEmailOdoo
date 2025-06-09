@@ -347,7 +347,7 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 if not EMAIL_USERNAME or not EMAIL_PASSWORD:
     raise Exception("Gmail credentials are not set in the environment variables.")
 
-receiver_emails = ["dany.work.99@gmail.com", "scoobicapps@gmail.com"]
+receiver_emails = ["dany.work.99@gmail.com", "antonio.suarez@scoobic.com", "daniel.byle@scoobic.com", "scoobicapps@gmail.com"]
 subject = f"Weekly Leads & History Report - {now.strftime('%Y-%m-%d')}"
 
 body_text = (
