@@ -47,6 +47,11 @@ sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
 sheet.clear()
 
 df = df.astype(str)  # Convert all data (especially Timestamps) to string
-sheet.update(values=[df.columns.tolist()] + df.values.tolist())  # Use named argument to avoid warning
+df = df.astype(str)  # convert everything to string (keep this)
+sheet.clear()        # clear the sheet first (keep this)
+sheet.update(range_name="A1",
+             values=[df.columns.tolist()] + df.values.tolist())
+
+
 
 print(f"Wrote {len(df)} rows to {WORKSHEET_NAME}")
