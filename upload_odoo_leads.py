@@ -45,6 +45,8 @@ client = gspread.authorize(creds)
 
 sheet = client.open_by_key(SPREADSHEET_ID).worksheet(WORKSHEET_NAME)
 sheet.clear()
-sheet.update([df.columns.tolist()] + df.values.tolist())
+
+df = df.astype(str)  # Convert all data (especially Timestamps) to string
+sheet.update(values=[df.columns.tolist()] + df.values.tolist())  # Use named argument to avoid warning
 
 print(f"Wrote {len(df)} rows to {WORKSHEET_NAME}")
