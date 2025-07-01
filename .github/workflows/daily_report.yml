@@ -2,8 +2,10 @@ name: Daily Leads Report
 
 on:
   schedule:
-    - cron: '0 5 * * *'  
+    - cron: "30 3 * * *"  # ✅ Runs at 05:30 Madrid time
   workflow_dispatch:
+
+ 
 
 jobs:
   build:
